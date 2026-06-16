@@ -109,4 +109,26 @@ Bot that scans top solana wallets for last 48 hours and produces list of top wal
 requests
 pandas
 python-dotenv
+HELIUS_API_KEY=your_helius_api_key_here
+BIRDEYE_API_KEY=your_birdeye_api_key_here
 
+LOOKBACK_HOURS=48
+MIN_WIN_RATE=0.50
+MIN_TRADES=10
+MIN_AVG_BUY_SOL=0.5
+TOP_WALLETS=100
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+print("================================")
+print(" Solana Wallet Tracker Started ")
+print("================================")
+
+print(f"Lookback Hours: {os.getenv('LOOKBACK_HOURS')}")
+print(f"Min Win Rate: {os.getenv('MIN_WIN_RATE')}")
+print(f"Min Trades: {os.getenv('MIN_TRADES')}")
+print(f"Min Avg Buy SOL: {os.getenv('MIN_AVG_BUY_SOL')}")
+print(f"Top Wallets: {os.getenv('TOP_WALLETS')}")
+python src/main.py
