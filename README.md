@@ -109,5 +109,4 @@ Bot that scans top solana wallets for last 48 hours and produces list of top wal
 requests
 pandas
 python-dotenv
-HELIUS_API_KEY=
-BIRDEYE_API_KEY=
+
