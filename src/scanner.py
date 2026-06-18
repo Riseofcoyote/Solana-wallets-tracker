@@ -7,7 +7,7 @@ from typing import Any
 
 import requests
 
-from .metrics import WalletMetrics, calculate_wallet_metrics
+from .metrics import WalletMetrics, calculate_wallet_metrics, utc_now
 
 HELIUS_BASE_URL = "https://api.helius.xyz/v0"
 BIRDEYE_BASE_URL = "https://public-api.birdeye.so"
@@ -98,11 +98,15 @@ class SolanaWalletScanner:
             raise RuntimeError("HELIUS_API_KEY is required to score wallets from chain activity.")
 
         url = f"{HELIUS_BASE_URL}/addresses/{wallet}/transactions"
-        params = {"api-key": self.config.helius_api_key}
-        body = {"limit": 100, "type": "SWAP"}
-        response = requests.post(url, params=params, json=body, timeout=30)
+        params = {"api-key": self.config.helius_api_key, "limit": 100, "type": "SWAP"}
+        response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
-        return response.json()
+        transactions = response.json()
+        return self._filter_lookback(transactions)
+
+    def _filter_lookback(self, transactions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cutoff = utc_now().timestamp() - (self.config.lookback_hours * 3600)
+        return [tx for tx in transactions if float(tx.get("timestamp") or 0) >= cutoff]
 
     def score_wallet(self, wallet: str) -> WalletMetrics:
         transactions = self.fetch_wallet_transactions(wallet)
