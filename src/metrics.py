@@ -34,9 +34,8 @@ class WalletMetrics:
 
     @property
     def is_likely_bot(self) -> bool:
-        # A perfect win rate over enough closed trades is usually too perfect,
-        # and huge trade counts often mean volume bots.
-        return (self.win_rate >= 1.0 and self.closed_trades >= 10) or self.trades >= 1000 or bool(self.bot_reason)
+        # A perfect win rate is usually too perfect, and huge trade counts often mean volume bots.
+        return (self.win_rate >= 1.0 and self.closed_trades > 0) or self.trades >= 1000 or bool(self.bot_reason)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -272,7 +271,7 @@ def calculate_wallet_metrics(wallet: str, transactions: Iterable[dict[str, Any]]
     roi = realized_profit_sol / realized_cost_basis_sol if realized_cost_basis_sol > EPSILON else 0.0
 
     bot_reason = ""
-    if win_rate >= 1.0 and closed_trades >= 10:
+    if win_rate >= 1.0 and closed_trades > 0:
         bot_reason = "100_percent_win_rate"
     elif trades >= 1000:
         bot_reason = "too_many_trades"
