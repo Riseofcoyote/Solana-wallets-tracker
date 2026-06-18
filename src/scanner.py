@@ -11,6 +11,8 @@ from .metrics import WalletMetrics, calculate_wallet_metrics, utc_now
 
 HELIUS_BASE_URL = "https://api.helius.xyz/v0"
 BIRDEYE_BASE_URL = "https://public-api.birdeye.so"
+DEXSCREENER_BASE_URL = "https://api.dexscreener.com"
+DEXSCREENER_TOKEN_PROFILES_URL = f"{DEXSCREENER_BASE_URL}/token-profiles/latest/v1"
 SOL_MINT = "So11111111111111111111111111111111111111112"
 
 
@@ -26,6 +28,9 @@ class ScannerConfig:
     top_wallets: int = 100
     max_wallets_to_score: int = 200
     sleep_seconds: float = 0.15
+    dexscreener_discovery: bool = False
+    dexscreener_token_profile_url: str = DEXSCREENER_TOKEN_PROFILES_URL
+    dexscreener_max_tokens: int = 25
 
     @classmethod
     def from_env(cls) -> "ScannerConfig":
@@ -41,7 +46,18 @@ class ScannerConfig:
             top_wallets=int(os.getenv("TOP_WALLETS", "100")),
             max_wallets_to_score=int(os.getenv("MAX_WALLETS_TO_SCORE", "200")),
             sleep_seconds=float(os.getenv("SLEEP_SECONDS", "0.15")),
+            dexscreener_discovery=_env_bool("DEXSCREENER_DISCOVERY", False),
+            dexscreener_token_profile_url=os.getenv("DEXSCREENER_TOKEN_PROFILE_URL", DEXSCREENER_TOKEN_PROFILES_URL).strip()
+            or DEXSCREENER_TOKEN_PROFILES_URL,
+            dexscreener_max_tokens=int(os.getenv("DEXSCREENER_MAX_TOKENS", "25")),
         )
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _dedupe_keep_order(values: list[str]) -> list[str]:
@@ -56,29 +72,46 @@ def _dedupe_keep_order(values: list[str]) -> list[str]:
     return results
 
 
+def _full_url(url_or_path: str) -> str:
+    value = url_or_path.strip()
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    if not value.startswith("/"):
+        value = f"/{value}"
+    return f"{DEXSCREENER_BASE_URL}{value}"
+
+
 class SolanaWalletScanner:
     def __init__(self, config: ScannerConfig):
         self.config = config
         self.helius_session = requests.Session()
         self.birdeye_session = requests.Session()
+        self.dexscreener_session = requests.Session()
         if config.birdeye_api_key:
             self.birdeye_session.headers.update({"X-API-KEY": config.birdeye_api_key, "x-chain": "solana"})
 
     def discover_wallets(self) -> list[str]:
         """Discover candidate wallets.
 
-        Uses Birdeye top trader endpoints when available. If that endpoint changes or no
-        key is provided, use SEED_WALLETS in .env as a comma-separated fallback.
+        DEX Screener can discover fresh Solana token mints. Birdeye is then used
+        to convert those token mints into top-trader wallet candidates. If no
+        API discovery is available, SEED_WALLETS can still be used as fallback.
         """
         seed_wallets = [w.strip() for w in os.getenv("SEED_WALLETS", "").split(",") if w.strip()]
         wallets: list[str] = list(seed_wallets)
+        token_mints = self.discover_token_mints()
 
         if not self.config.birdeye_api_key:
+            if token_mints:
+                print(
+                    "DEX Screener discovered token mints, but BIRDEYE_API_KEY is needed "
+                    "to convert tokens into top-trader wallets."
+                )
             if not wallets:
                 print("No BIRDEYE_API_KEY or SEED_WALLETS found, so there are no wallets to score.")
             return _dedupe_keep_order(wallets)[: self.config.max_wallets_to_score]
 
-        for mint in self.config.discovery_token_mints or [SOL_MINT]:
+        for mint in token_mints:
             try:
                 wallets.extend(self._birdeye_top_traders(mint))
             except requests.RequestException as exc:
@@ -86,6 +119,48 @@ class SolanaWalletScanner:
             time.sleep(self.config.sleep_seconds)
 
         return _dedupe_keep_order(wallets)[: self.config.max_wallets_to_score]
+
+    def discover_token_mints(self) -> list[str]:
+        mints = list(self.config.discovery_token_mints or [SOL_MINT])
+        if self.config.dexscreener_discovery:
+            try:
+                mints.extend(self._dexscreener_recent_solana_token_mints())
+            except requests.RequestException as exc:
+                print(f"DEX Screener discovery failed: {self._format_http_error(exc)}")
+        return _dedupe_keep_order(mints)
+
+    def _dexscreener_recent_solana_token_mints(self) -> list[str]:
+        """Fetch recent Solana token profile mints from DEX Screener.
+
+        The default endpoint is the documented HTTP latest profile endpoint.
+        DEXSCREENER_TOKEN_PROFILE_URL can override it if you want to test a newer
+        path such as /token-profiles/recent-updates/v1.
+        """
+        url = _full_url(self.config.dexscreener_token_profile_url)
+        response = self.dexscreener_session.get(url, headers={"Accept": "*/*"}, timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+
+        if isinstance(payload, dict):
+            items = payload.get("items") or payload.get("data") or payload.get("profiles") or []
+        elif isinstance(payload, list):
+            items = payload
+        else:
+            items = []
+
+        mints: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            chain_id = str(item.get("chainId") or "").strip().lower()
+            token_address = str(item.get("tokenAddress") or item.get("address") or "").strip()
+            if chain_id == "solana" and token_address:
+                mints.append(token_address)
+            if len(mints) >= self.config.dexscreener_max_tokens:
+                break
+
+        print(f"DEX Screener discovered {len(mints)} recent Solana token mint(s)")
+        return mints
 
     def _birdeye_top_traders(self, token_mint: str) -> list[str]:
         # Birdeye endpoint names occasionally change. This keeps the prototype isolated
