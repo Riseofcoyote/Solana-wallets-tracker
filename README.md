@@ -10,6 +10,7 @@ Prototype Python scanner for finding active Solana wallets that may be worth res
 - Discovers fresh Solana token mints from DEX Screener when enabled.
 - Discovers candidate wallets from Birdeye top-trader data when an API key is available.
 - Scores wallets using recent Helius enhanced SWAP transactions.
+- Optionally verifies candidate wallet activity with Solscan.
 - Estimates realized PnL in SOL from recent buy/sell flows using average-cost token positions.
 - Filters out likely bots:
   - 100% win rate
@@ -31,6 +32,7 @@ Solana-wallets-tracker/
 │   ├── main.py
 │   ├── scanner.py
 │   ├── metrics.py
+│   ├── solscan.py
 │   ├── demo.py
 │   └── exporter.py
 ├── .env.example
@@ -90,6 +92,7 @@ After the demo works, edit `.env`:
 DEMO_MODE=false
 HELIUS_API_KEY=your_helius_api_key_here
 BIRDEYE_API_KEY=your_birdeye_api_key_here
+SOLSCAN_API_KEY=your_new_rotated_solscan_api_key_here
 
 LOOKBACK_HOURS=48
 MIN_WIN_RATE=0.50
@@ -127,15 +130,25 @@ If you want to try the route you sent, override the URL/path:
 DEXSCREENER_TOKEN_PROFILE_URL=/token-profiles/recent-updates/v1
 ```
 
+Optional Solscan wallet verification:
+
+```env
+SOLSCAN_ENRICHMENT=true
+SOLSCAN_ACCOUNT_TRANSFER_URL=https://pro-api.solscan.io/v2.0/account/transfer
+SOLSCAN_AUTH_HEADER=token
+```
+
+If your Solscan plan uses a different endpoint or header name, change `SOLSCAN_ACCOUNT_TRANSFER_URL` or `SOLSCAN_AUTH_HEADER` in `.env` without editing code.
+
 Run API scan:
 
 ```bash
 python -m src.main
 ```
 
-## How DEX Screener is used
+## How DEX Screener, Birdeye, Helius, and Solscan are used
 
-DEX Screener is used to discover fresh Solana token mints. It does not directly provide copy-trading wallet PnL. The scanner flow is:
+DEX Screener is used to discover fresh Solana token mints. Birdeye turns token mints into candidate top-trader wallets. Helius scores each wallet's recent swaps. Solscan can optionally verify that a passing wallet has recent transfer activity.
 
 ```text
 DEX Screener recent token profiles
@@ -148,10 +161,12 @@ Helius wallet SWAP transactions
         ↓
 Local realized-PnL estimate + filters
         ↓
+Optional Solscan transfer-activity verification
+        ↓
 output/top_wallets.csv
 ```
 
-You still need `BIRDEYE_API_KEY` to turn token mints into candidate wallets, and `HELIUS_API_KEY` to score each wallet's recent activity.
+You still need `BIRDEYE_API_KEY` to turn token mints into candidate wallets, `HELIUS_API_KEY` to score each wallet's recent activity, and `SOLSCAN_API_KEY` only if `SOLSCAN_ENRICHMENT=true`.
 
 ## Run CSV analysis mode
 
@@ -191,11 +206,15 @@ This is a working research prototype, not a live trading bot. The API scanner es
 
 Use the output as a shortlist for research, not an automatic copy-trading signal.
 
+## Security note
+
+Do not commit `.env` or paste live API keys into public places. If an API key is pasted into a chat or issue by mistake, revoke/regenerate it and use the new key locally.
+
 ## Next upgrades
 
 - Add exact realized PnL per token across longer history.
 - Add DEX Screener pair filtering by liquidity, volume, and recent buy/sell activity.
-- Add Solscan wallet enrichment as an optional verification source.
+- Add deeper Solscan enrichment fields in the output CSV.
 - Store wallet history in SQLite/Postgres.
 - Add Telegram alerts.
 - Add paper-trading simulation.
