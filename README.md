@@ -1,6 +1,6 @@
 # Solana Wallets Tracker
 
-Prototype Python scanner for finding active Solana wallets that may be worth researching for copy trading.
+Prototype Python scanner for finding active Solana wallets that may be worth researching.
 
 > Research tool only. Crypto trading is risky. This repo does **not** connect private keys, place live trades, or custody funds.
 
@@ -19,9 +19,16 @@ Prototype Python scanner for finding active Solana wallets that may be worth res
   - Win rate > 50%
   - Minimum 10 trades
   - Average buy size >= 0.5 SOL
-  - Active today
-- Exports ranked wallets to CSV.
+  - Active in the lookback window
+- Exports a full ranked CSV and a top 5 research shortlist.
 - Includes CSV mode so you can filter an uploaded/exported wallet list without API calls.
+
+## Output files
+
+```text
+output/top_wallets.csv
+output/top_5_research_candidates.csv
+```
 
 ## Project structure
 
@@ -53,7 +60,7 @@ pip install -r requirements.txt
 
 ## Quick test without API keys
 
-Use demo mode first. It creates a fake active wallet with 12 demo swaps and exports a CSV so you can confirm the code path works.
+Use demo mode first. It creates fake active wallets and exports CSV files so you can confirm the code path works.
 
 ```bash
 cp .env.example .env
@@ -72,10 +79,11 @@ Run:
 python -m src.main
 ```
 
-Expected output file:
+Expected output files:
 
 ```text
 output/top_wallets.csv
+output/top_5_research_candidates.csv
 ```
 
 You can also run the demo directly:
@@ -91,9 +99,10 @@ After the demo works, edit `.env`:
 ```env
 DEMO_MODE=false
 HELIUS_API_KEY=your_helius_api_key_here
-BIRDEYE_API_KEY=your_birdeye_api_key_herSOLSCAN_API_KEY eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjcmVhdGVkQXQiOjE3ODE3ODY2NDI3NTgsImVtYWlsIjoiYWRhbXNtZWNoYW5pY2FsaHZhY0BnbWFpbC5jb20iLCJhY3Rpb24iOiJ0b2tlbi1hcGkiLCJhcGlWZXJzaW9uIjoidjIiLCJpYXQiOjE3ODE3ODY2NDJ9.fDkvhoJSFiLZKM9ULIpDsUIaPz38Rafdxk_1Fuxhcqg
+BIRDEYE_API_KEY=your_birdeye_api_key_here
+SOLSCAN_API_KEY=your_solscan_api_key_here
 
-LOOKBACK_HOURS=48
+LOOKBACK_HOURS=24
 MIN_WIN_RATE=0.50
 MIN_TRADES=10
 MIN_AVG_BUY_SOL=0.5
@@ -123,12 +132,6 @@ DEXSCREENER_MAX_TOKENS=25
 DEXSCREENER_TOKEN_PROFILE_URL=https://api.dexscreener.com/token-profiles/latest/v1
 ```
 
-If you want to try the route you sent, override the URL/path:
-
-```env
-DEXSCREENER_TOKEN_PROFILE_URL=/token-profiles/recent-updates/v1
-```
-
 Optional Solscan wallet verification:
 
 ```env
@@ -137,8 +140,6 @@ SOLSCAN_ACCOUNT_TRANSFER_URL=https://pro-api.solscan.io/v2.0/account/transfer
 SOLSCAN_AUTH_HEADER=token
 ```
 
-If your Solscan plan uses a different endpoint or header name, change `SOLSCAN_ACCOUNT_TRANSFER_URL` or `SOLSCAN_AUTH_HEADER` in `.env` without editing code.
-
 Run API scan:
 
 ```bash
@@ -146,8 +147,6 @@ python -m src.main
 ```
 
 ## How DEX Screener, Birdeye, Helius, and Solscan are used
-
-DEX Screener is used to discover fresh Solana token mints. Birdeye turns token mints into candidate top-trader wallets. Helius scores each wallet's recent swaps. Solscan can optionally verify that a passing wallet has recent transfer activity.
 
 ```text
 DEX Screener recent token profiles
@@ -163,6 +162,7 @@ Local realized-PnL estimate + filters
 Optional Solscan transfer-activity verification
         ↓
 output/top_wallets.csv
+output/top_5_research_candidates.csv
 ```
 
 You still need `BIRDEYE_API_KEY` to turn token mints into candidate wallets, `HELIUS_API_KEY` to score each wallet's recent activity, and `SOLSCAN_API_KEY` only if `SOLSCAN_ENRICHMENT=true`.
@@ -201,13 +201,13 @@ wallet,win_rate,roi,avg_buy_size_sol,trades,closed_trades,realized_profit_sol,re
 
 ## Important prototype notes
 
-This is a working research prototype, not a live trading bot. The API scanner estimates realized PnL from recent Helius enhanced transaction payloads. It is better than the old placeholder scoring, but exact wallet PnL still needs deeper cost-basis tracking across longer history, token decimals, fees, partial fills, wrapped SOL routes, and aggregator edge cases.
+This is a working research prototype, not a live trading bot. The API scanner estimates realized PnL from recent Helius enhanced transaction payloads. Exact wallet PnL still needs deeper cost-basis tracking across longer history, token decimals, fees, partial fills, wrapped SOL routes, and aggregator edge cases.
 
-Use the output as a shortlist for research, not an automatic copy-trading signal.
+Use the output as a shortlist for research, not an automatic trading signal.
 
 ## Security note
 
-Do not commit `.env` or paste live API keys into public places. If an API key is pasted into a chat or issue by mistake, revoke/regenerate it and use the new key locally.
+Do not commit `.env` or paste live API keys into public places. If an API key is pasted into a chat, issue, README, or commit by mistake, revoke/regenerate it and use the new key locally.
 
 ## Next upgrades
 
@@ -217,4 +217,3 @@ Do not commit `.env` or paste live API keys into public places. If an API key is
 - Store wallet history in SQLite/Postgres.
 - Add Telegram alerts.
 - Add paper-trading simulation.
-- Add copy-trading only after long paper testing.
