@@ -86,10 +86,18 @@ def main() -> None:
     load_dotenv()
     output_file = os.getenv("OUTPUT_FILE", "output/top_wallets.csv")
     input_csv = os.getenv("INPUT_CSV", "").strip()
+    demo_mode = _truthy(os.getenv("DEMO_MODE", ""))
 
     print("================================")
     print(" Solana Wallet Tracker Started ")
     print("================================")
+
+    if demo_mode:
+        print("Mode: demo / no API keys")
+        from .demo import run_demo
+
+        run_demo(output_file)
+        return
 
     if input_csv:
         print(f"Mode: CSV analysis ({input_csv})")
