@@ -8,6 +8,7 @@ from typing import Any
 import requests
 
 from .metrics import WalletMetrics, calculate_wallet_metrics, utc_now
+from .solscan import DEFAULT_SOLSCAN_ACCOUNT_TRANSFER_URL, SolscanClient
 
 HELIUS_BASE_URL = "https://api.helius.xyz/v0"
 BIRDEYE_BASE_URL = "https://public-api.birdeye.so"
@@ -31,6 +32,10 @@ class ScannerConfig:
     dexscreener_discovery: bool = False
     dexscreener_token_profile_url: str = DEXSCREENER_TOKEN_PROFILES_URL
     dexscreener_max_tokens: int = 25
+    solscan_api_key: str = ""
+    solscan_enrichment: bool = False
+    solscan_account_transfer_url: str = DEFAULT_SOLSCAN_ACCOUNT_TRANSFER_URL
+    solscan_auth_header: str = "token"
 
     @classmethod
     def from_env(cls) -> "ScannerConfig":
@@ -50,6 +55,13 @@ class ScannerConfig:
             dexscreener_token_profile_url=os.getenv("DEXSCREENER_TOKEN_PROFILE_URL", DEXSCREENER_TOKEN_PROFILES_URL).strip()
             or DEXSCREENER_TOKEN_PROFILES_URL,
             dexscreener_max_tokens=int(os.getenv("DEXSCREENER_MAX_TOKENS", "25")),
+            solscan_api_key=os.getenv("SOLSCAN_API_KEY", "").strip(),
+            solscan_enrichment=_env_bool("SOLSCAN_ENRICHMENT", False),
+            solscan_account_transfer_url=os.getenv(
+                "SOLSCAN_ACCOUNT_TRANSFER_URL", DEFAULT_SOLSCAN_ACCOUNT_TRANSFER_URL
+            ).strip()
+            or DEFAULT_SOLSCAN_ACCOUNT_TRANSFER_URL,
+            solscan_auth_header=os.getenv("SOLSCAN_AUTH_HEADER", "token").strip() or "token",
         )
 
 
@@ -87,8 +99,20 @@ class SolanaWalletScanner:
         self.helius_session = requests.Session()
         self.birdeye_session = requests.Session()
         self.dexscreener_session = requests.Session()
+        self.solscan_client: SolscanClient | None = None
+
         if config.birdeye_api_key:
             self.birdeye_session.headers.update({"X-API-KEY": config.birdeye_api_key, "x-chain": "solana"})
+
+        if config.solscan_enrichment:
+            if config.solscan_api_key:
+                self.solscan_client = SolscanClient(
+                    api_key=config.solscan_api_key,
+                    account_transfer_url=config.solscan_account_transfer_url,
+                    auth_header=config.solscan_auth_header,
+                )
+            else:
+                print("SOLSCAN_ENRICHMENT=true but SOLSCAN_API_KEY is not set; skipping Solscan verification.")
 
     def discover_wallets(self) -> list[str]:
         """Discover candidate wallets.
@@ -229,7 +253,7 @@ class SolanaWalletScanner:
                 print(f"[{index}/{len(candidates)}] Skipped {wallet}: {self._format_http_error(exc)}")
                 continue
 
-            if self._passes_filters(metrics):
+            if self._passes_filters(metrics) and self._passes_solscan_verification(metrics.wallet):
                 scored.append(metrics)
                 print(
                     f"[{index}/{len(candidates)}] PASS {wallet} "
@@ -253,6 +277,24 @@ class SolanaWalletScanner:
             and metrics.trades >= self.config.min_trades
             and metrics.avg_buy_size_sol >= self.config.min_avg_buy_sol
         )
+
+    def _passes_solscan_verification(self, wallet: str) -> bool:
+        if not self.solscan_client:
+            return True
+
+        try:
+            summary = self.solscan_client.summarize_wallet_activity(wallet, self.config.lookback_hours)
+        except Exception as exc:
+            # Do not block a wallet just because optional enrichment is temporarily unavailable.
+            print(f"Solscan verification skipped for {wallet}: {self._format_http_error(exc)}")
+            return True
+
+        if not summary.active_in_lookback:
+            print(f"Solscan verification failed for {wallet}: no transfers in the lookback window")
+            return False
+
+        print(f"Solscan verified {wallet}: last_transfer_at={summary.last_transfer_at}")
+        return True
 
     def _failure_reasons(self, metrics: WalletMetrics) -> list[str]:
         reasons: list[str] = []
