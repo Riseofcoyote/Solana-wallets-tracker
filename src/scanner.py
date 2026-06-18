@@ -40,15 +40,29 @@ class ScannerConfig:
             min_avg_buy_sol=float(os.getenv("MIN_AVG_BUY_SOL", "0.5")),
             top_wallets=int(os.getenv("TOP_WALLETS", "100")),
             max_wallets_to_score=int(os.getenv("MAX_WALLETS_TO_SCORE", "200")),
+            sleep_seconds=float(os.getenv("SLEEP_SECONDS", "0.15")),
         )
+
+
+def _dedupe_keep_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    results: list[str] = []
+    for value in values:
+        value = value.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        results.append(value)
+    return results
 
 
 class SolanaWalletScanner:
     def __init__(self, config: ScannerConfig):
         self.config = config
-        self.session = requests.Session()
+        self.helius_session = requests.Session()
+        self.birdeye_session = requests.Session()
         if config.birdeye_api_key:
-            self.session.headers.update({"X-API-KEY": config.birdeye_api_key, "x-chain": "solana"})
+            self.birdeye_session.headers.update({"X-API-KEY": config.birdeye_api_key, "x-chain": "solana"})
 
     def discover_wallets(self) -> list[str]:
         """Discover candidate wallets.
@@ -57,19 +71,21 @@ class SolanaWalletScanner:
         key is provided, use SEED_WALLETS in .env as a comma-separated fallback.
         """
         seed_wallets = [w.strip() for w in os.getenv("SEED_WALLETS", "").split(",") if w.strip()]
-        wallets: set[str] = set(seed_wallets)
+        wallets: list[str] = list(seed_wallets)
 
         if not self.config.birdeye_api_key:
-            return list(wallets)[: self.config.max_wallets_to_score]
+            if not wallets:
+                print("No BIRDEYE_API_KEY or SEED_WALLETS found, so there are no wallets to score.")
+            return _dedupe_keep_order(wallets)[: self.config.max_wallets_to_score]
 
         for mint in self.config.discovery_token_mints or [SOL_MINT]:
             try:
-                wallets.update(self._birdeye_top_traders(mint))
+                wallets.extend(self._birdeye_top_traders(mint))
             except requests.RequestException as exc:
-                print(f"Birdeye discovery failed for {mint}: {exc}")
+                print(f"Birdeye discovery failed for {mint}: {self._format_http_error(exc)}")
             time.sleep(self.config.sleep_seconds)
 
-        return list(wallets)[: self.config.max_wallets_to_score]
+        return _dedupe_keep_order(wallets)[: self.config.max_wallets_to_score]
 
     def _birdeye_top_traders(self, token_mint: str) -> list[str]:
         # Birdeye endpoint names occasionally change. This keeps the prototype isolated
@@ -82,11 +98,11 @@ class SolanaWalletScanner:
             "sort_type": "desc",
             "limit": 50,
         }
-        response = self.session.get(url, params=params, timeout=30)
+        response = self.birdeye_session.get(url, params=params, timeout=30)
         response.raise_for_status()
         payload = response.json()
         items = payload.get("data", {}).get("items", []) or payload.get("data", []) or []
-        results = []
+        results: list[str] = []
         for item in items:
             wallet = item.get("owner") or item.get("wallet") or item.get("address")
             if wallet:
@@ -99,14 +115,24 @@ class SolanaWalletScanner:
 
         url = f"{HELIUS_BASE_URL}/addresses/{wallet}/transactions"
         params = {"api-key": self.config.helius_api_key, "limit": 100, "type": "SWAP"}
-        response = requests.get(url, params=params, timeout=30)
+        response = self.helius_session.get(url, params=params, timeout=30)
         response.raise_for_status()
         transactions = response.json()
+        if not isinstance(transactions, list):
+            raise RuntimeError(f"Unexpected Helius response shape for {wallet}: {type(transactions).__name__}")
         return self._filter_lookback(transactions)
 
     def _filter_lookback(self, transactions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         cutoff = utc_now().timestamp() - (self.config.lookback_hours * 3600)
-        return [tx for tx in transactions if float(tx.get("timestamp") or 0) >= cutoff]
+        filtered: list[dict[str, Any]] = []
+        for tx in transactions:
+            try:
+                timestamp = float(tx.get("timestamp") or 0)
+            except (TypeError, ValueError):
+                continue
+            if timestamp >= cutoff:
+                filtered.append(tx)
+        return filtered
 
     def score_wallet(self, wallet: str) -> WalletMetrics:
         transactions = self.fetch_wallet_transactions(wallet)
@@ -116,19 +142,28 @@ class SolanaWalletScanner:
         candidates = self.discover_wallets()
         print(f"Discovered {len(candidates)} wallet candidates")
 
+        if candidates and not self.config.helius_api_key:
+            print("Set HELIUS_API_KEY in .env before running API scan mode.")
+            return []
+
         scored: list[WalletMetrics] = []
         for index, wallet in enumerate(candidates, start=1):
             try:
                 metrics = self.score_wallet(wallet)
             except Exception as exc:  # keep scanning if one wallet/API call fails
-                print(f"[{index}/{len(candidates)}] Skipped {wallet}: {exc}")
+                print(f"[{index}/{len(candidates)}] Skipped {wallet}: {self._format_http_error(exc)}")
                 continue
 
             if self._passes_filters(metrics):
                 scored.append(metrics)
-                print(f"[{index}/{len(candidates)}] PASS {wallet} ROI={metrics.roi:.2%} WR={metrics.win_rate:.2%}")
+                print(
+                    f"[{index}/{len(candidates)}] PASS {wallet} "
+                    f"ROI={metrics.roi:.2%} WR={metrics.win_rate:.2%} "
+                    f"trades={metrics.trades} closed={metrics.closed_trades}"
+                )
             else:
-                print(f"[{index}/{len(candidates)}] fail {wallet}")
+                reasons = ", ".join(self._failure_reasons(metrics)) or "below threshold"
+                print(f"[{index}/{len(candidates)}] fail {wallet} ({reasons})")
             time.sleep(self.config.sleep_seconds)
 
         scored.sort(key=lambda w: (w.roi, w.win_rate, w.avg_buy_size_sol), reverse=True)
@@ -143,3 +178,28 @@ class SolanaWalletScanner:
             and metrics.trades >= self.config.min_trades
             and metrics.avg_buy_size_sol >= self.config.min_avg_buy_sol
         )
+
+    def _failure_reasons(self, metrics: WalletMetrics) -> list[str]:
+        reasons: list[str] = []
+        if metrics.bot_reason:
+            reasons.append(metrics.bot_reason)
+        elif metrics.is_likely_bot:
+            reasons.append("likely_bot")
+        if not metrics.active_today:
+            reasons.append("not_active_today")
+        if metrics.win_rate <= self.config.min_win_rate:
+            reasons.append(f"win_rate<={self.config.min_win_rate:.0%}")
+        if metrics.trades < self.config.min_trades:
+            reasons.append(f"trades<{self.config.min_trades}")
+        if metrics.avg_buy_size_sol < self.config.min_avg_buy_sol:
+            reasons.append(f"avg_buy<{self.config.min_avg_buy_sol:g}_SOL")
+        return reasons
+
+    @staticmethod
+    def _format_http_error(exc: BaseException) -> str:
+        response = getattr(exc, "response", None)
+        if response is None:
+            return str(exc)
+        body = getattr(response, "text", "") or ""
+        body = body[:250].replace("\n", " ")
+        return f"{exc} | response={body}"
