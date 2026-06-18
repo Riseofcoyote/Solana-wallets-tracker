@@ -19,6 +19,13 @@ def _env_int(name: str, default: int) -> int:
     return int(os.getenv(name, str(default)))
 
 
+def _truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "active"}
+
+
 def analyze_existing_csv(input_file: str, output_file: str) -> Path:
     """Filter/rank an existing CSV of wallet metrics.
 
@@ -47,6 +54,8 @@ def analyze_existing_csv(input_file: str, output_file: str) -> Path:
             df["active_today"] = df["last_trade_at"].fillna("").apply(is_today_utc)
         else:
             df["active_today"] = True
+    else:
+        df["active_today"] = df["active_today"].apply(_truthy)
 
     min_win_rate = _env_float("MIN_WIN_RATE", 0.50)
     min_trades = _env_int("MIN_TRADES", 10)
@@ -59,7 +68,7 @@ def analyze_existing_csv(input_file: str, output_file: str) -> Path:
 
     filtered = df[
         (df["bot_reason"] == "")
-        & (df["active_today"].astype(bool))
+        & (df["active_today"])
         & (df["win_rate"] > min_win_rate)
         & (df["trades"] >= min_trades)
         & (df["avg_buy_size_sol"] >= min_avg_buy)
