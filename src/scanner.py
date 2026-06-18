@@ -22,7 +22,7 @@ class ScannerConfig:
     helius_api_key: str
     birdeye_api_key: str = ""
     discovery_token_mints: list[str] | None = None
-    lookback_hours: int = 48
+    lookback_hours: int = 24
     min_win_rate: float = 0.50
     min_trades: int = 10
     min_avg_buy_sol: float = 0.5
@@ -44,7 +44,7 @@ class ScannerConfig:
             helius_api_key=os.getenv("HELIUS_API_KEY", "").strip(),
             birdeye_api_key=os.getenv("BIRDEYE_API_KEY", "").strip(),
             discovery_token_mints=[t.strip() for t in tokens.split(",") if t.strip()] or [SOL_MINT],
-            lookback_hours=int(os.getenv("LOOKBACK_HOURS", "48")),
+            lookback_hours=int(os.getenv("LOOKBACK_HOURS", "24")),
             min_win_rate=float(os.getenv("MIN_WIN_RATE", "0.50")),
             min_trades=int(os.getenv("MIN_TRADES", "10")),
             min_avg_buy_sol=float(os.getenv("MIN_AVG_BUY_SOL", "0.5")),
