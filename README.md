@@ -7,6 +7,7 @@ Prototype Python scanner for finding active Solana wallets that may be worth res
 ## What it does
 
 - Runs a no-API demo so you can confirm the project works locally.
+- Discovers fresh Solana token mints from DEX Screener when enabled.
 - Discovers candidate wallets from Birdeye top-trader data when an API key is available.
 - Scores wallets using recent Helius enhanced SWAP transactions.
 - Estimates realized PnL in SOL from recent buy/sell flows using average-cost token positions.
@@ -112,11 +113,45 @@ Optional token discovery list:
 DISCOVERY_TOKEN_MINTS=So11111111111111111111111111111111111111112
 ```
 
+Optional DEX Screener discovery:
+
+```env
+DEXSCREENER_DISCOVERY=true
+DEXSCREENER_MAX_TOKENS=25
+DEXSCREENER_TOKEN_PROFILE_URL=https://api.dexscreener.com/token-profiles/latest/v1
+```
+
+If you want to try the route you sent, override the URL/path:
+
+```env
+DEXSCREENER_TOKEN_PROFILE_URL=/token-profiles/recent-updates/v1
+```
+
 Run API scan:
 
 ```bash
 python -m src.main
 ```
+
+## How DEX Screener is used
+
+DEX Screener is used to discover fresh Solana token mints. It does not directly provide copy-trading wallet PnL. The scanner flow is:
+
+```text
+DEX Screener recent token profiles
+        ↓
+Fresh Solana token mint list
+        ↓
+Birdeye top traders for each token mint
+        ↓
+Helius wallet SWAP transactions
+        ↓
+Local realized-PnL estimate + filters
+        ↓
+output/top_wallets.csv
+```
+
+You still need `BIRDEYE_API_KEY` to turn token mints into candidate wallets, and `HELIUS_API_KEY` to score each wallet's recent activity.
 
 ## Run CSV analysis mode
 
@@ -159,7 +194,7 @@ Use the output as a shortlist for research, not an automatic copy-trading signal
 ## Next upgrades
 
 - Add exact realized PnL per token across longer history.
-- Add DEX Screener token/pair discovery as an optional discovery source.
+- Add DEX Screener pair filtering by liquidity, volume, and recent buy/sell activity.
 - Add Solscan wallet enrichment as an optional verification source.
 - Store wallet history in SQLite/Postgres.
 - Add Telegram alerts.
