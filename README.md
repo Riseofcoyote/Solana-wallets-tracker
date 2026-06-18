@@ -1,114 +1,59 @@
-Solana Wallets Tracker
+# Solana Wallets Tracker
 
-A Python-based Solana wallet scanner designed to identify high-performing wallets from the last 48 hours.
+Prototype Python scanner for finding active Solana wallets that may be worth researching for copy trading.
 
-Features
+> Research tool only. Crypto trading is risky. Do not connect private keys or automate live trades until you have paper-tested thoroughly.
 
-- Scans active Solana wallets
-- Filters wallets using custom performance metrics
-- Calculates:
-  - Win Rate
-  - ROI
-  - Average Buy Size
-  - Trade Count
-- Exports ranked wallets to CSV
-- Built for future integration with paper trading and copy trading systems
+## What it does
 
-Wallet Selection Criteria
+- Discovers candidate wallets from Birdeye top-trader data when an API key is available.
+- Scores wallets using recent Helius enhanced transactions.
+- Filters out likely bots:
+  - 100% win rate
+  - 1,000+ trades
+- Keeps only wallets that match your thresholds:
+  - Win rate > 50%
+  - Minimum 10 trades
+  - Average buy size >= 0.5 SOL
+  - Active today
+- Exports ranked wallets to CSV.
+- Includes CSV mode so you can filter an uploaded/exported wallet list without API calls.
 
-A wallet must meet all of the following:
+## Project structure
 
-- Win Rate > 50%
-- Minimum 10 completed trades
-- Average Buy Size ≥ 0.5 SOL
-- Active within the last 48 hours
-
-Wallets are ranked primarily by ROI.
-
-Project Structure
-
+```text
 Solana-wallets-tracker/
-│
 ├── src/
+│   ├── __init__.py
 │   ├── main.py
 │   ├── scanner.py
 │   ├── metrics.py
 │   └── exporter.py
-│
-├── output/
-│   └── top_wallets.csv
-│
+├── .env.example
+├── .gitignore
 ├── requirements.txt
-├── .env
 └── README.md
+```
 
-Installation
+## Install
 
+```bash
 git clone https://github.com/Riseofcoyote/Solana-wallets-tracker.git
 cd Solana-wallets-tracker
-
 python -m venv .venv
-
-# Linux / Mac
-source .venv/bin/activate
-
-# Windows
-.venv\Scripts\activate
-
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
 
-Environment Variables
+## Configure
 
-Create a ".env" file:
+```bash
+cp .env.example .env
+```
 
-HELIUS_API_KEY=YOUR_HELIUS_KEY
-BIRDEYE_API_KEY=YOUR_BIRDEYE_KEY
+Edit `.env`:
 
-Run
-
-python -m src.main
-
-Output
-
-The scanner will generate:
-
-output/top_wallets.csv
-
-Example:
-
-wallet,win_rate,roi,avg_buy_size,trades
-wallet1,68.5,142.7,1.3,34
-wallet2,61.2,98.4,0.9,18
-
-Roadmap
-
-Phase 1
-
-- Wallet discovery
-- Performance scoring
-- CSV exports
-
-Phase 2
-
-- Telegram alerts
-- Database storage
-- Historical tracking
-
-Phase 3
-
-- Paper trading
-
-Phase 4
-
-- Automated copy trading
-
-Disclaimer
-
-This software is for research and educational purposes only. Cryptocurrency trading is risky and can result in significant financial losses. Always test with paper trading before using real funds.# Solana-wallets-tracker
-Bot that scans top solana wallets for last 48 hours and produces list of top wallets to copy trade
-requests
-pandas
-python-dotenv
+```env
 HELIUS_API_KEY=your_helius_api_key_here
 BIRDEYE_API_KEY=your_birdeye_api_key_here
 
@@ -117,18 +62,64 @@ MIN_WIN_RATE=0.50
 MIN_TRADES=10
 MIN_AVG_BUY_SOL=0.5
 TOP_WALLETS=100
-from dotenv import load_dotenv
-import os
+OUTPUT_FILE=output/top_wallets.csv
+```
 
-load_dotenv()
+Optional fallback if wallet discovery fails or you want to test known wallets:
 
-print("================================")
-print(" Solana Wallet Tracker Started ")
-print("================================")
+```env
+SEED_WALLETS=wallet1,wallet2,wallet3
+```
 
-print(f"Lookback Hours: {os.getenv('LOOKBACK_HOURS')}")
-print(f"Min Win Rate: {os.getenv('MIN_WIN_RATE')}")
-print(f"Min Trades: {os.getenv('MIN_TRADES')}")
-print(f"Min Avg Buy SOL: {os.getenv('MIN_AVG_BUY_SOL')}")
-print(f"Top Wallets: {os.getenv('TOP_WALLETS')}")
-python src/main.py
+Optional token discovery list:
+
+```env
+DISCOVERY_TOKEN_MINTS=So11111111111111111111111111111111111111112
+```
+
+## Run API scan
+
+```bash
+python -m src.main
+```
+
+Output:
+
+```text
+output/top_wallets.csv
+```
+
+## Run CSV analysis mode
+
+Use this when you already have a wallet CSV.
+
+Expected columns:
+
+```csv
+wallet,win_rate,roi,avg_buy_size_sol,trades,last_trade_at
+```
+
+Then add this to `.env`:
+
+```env
+INPUT_CSV=sniper-wallets.csv
+OUTPUT_FILE=output/top_wallets.csv
+```
+
+Run:
+
+```bash
+python -m src.main
+```
+
+## Important prototype notes
+
+This is a working prototype, but true wallet ROI needs deeper token cost-basis tracking. The current API scanner estimates performance from recent swap activity and ranks candidates for research. The CSV mode is better when your input file already includes win rate, ROI, trade count, buy size, and last active time.
+
+## Next upgrades
+
+- Add exact realized PnL per token.
+- Store wallet history in SQLite/Postgres.
+- Add Telegram alerts.
+- Add paper-trading simulation.
+- Add copy-trading only after long paper testing.
