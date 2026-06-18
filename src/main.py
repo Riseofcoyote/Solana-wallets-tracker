@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 
-from .exporter import export_wallets
+from .exporter import export_ranked_dataframe, export_wallets
 from .metrics import WalletMetrics, is_today_utc
 from .scanner import ScannerConfig, SolanaWalletScanner
 
@@ -26,7 +26,7 @@ def _truthy(value: object) -> bool:
     return text in {"1", "true", "yes", "y", "active"}
 
 
-def analyze_existing_csv(input_file: str, output_file: str) -> Path:
+def analyze_existing_csv(input_file: str, output_file: str) -> tuple[Path, Path]:
     """Filter/rank an existing CSV of wallet metrics.
 
     Expected columns: wallet, win_rate, roi, avg_buy_size_sol or avg_buy_size, trades,
@@ -74,12 +74,8 @@ def analyze_existing_csv(input_file: str, output_file: str) -> Path:
         & (df["avg_buy_size_sol"] >= min_avg_buy)
     ].copy()
 
-    filtered = filtered.sort_values(["roi", "win_rate", "avg_buy_size_sol"], ascending=[False, False, False]).head(top_wallets)
-
-    path = Path(output_file)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    filtered.to_csv(path, index=False)
-    return path
+    filtered = filtered.head(top_wallets)
+    return export_ranked_dataframe(filtered, output_file)
 
 
 def main() -> None:
@@ -96,21 +92,25 @@ def main() -> None:
         print("Mode: demo / no API keys")
         from .demo import run_demo
 
-        run_demo(output_file)
+        full_output, top_output = run_demo(output_file)
+        print(f"Saved full ranked list to {full_output}")
+        print(f"Saved top 5 research list to {top_output}")
         return
 
     if input_csv:
         print(f"Mode: CSV analysis ({input_csv})")
-        output = analyze_existing_csv(input_csv, output_file)
-        print(f"Saved ranked wallets to {output}")
+        full_output, top_output = analyze_existing_csv(input_csv, output_file)
+        print(f"Saved full ranked list to {full_output}")
+        print(f"Saved top 5 research list to {top_output}")
         return
 
     print("Mode: API scan")
     config = ScannerConfig.from_env()
     scanner = SolanaWalletScanner(config)
     wallets: list[WalletMetrics] = scanner.scan()
-    output = export_wallets(wallets, output_file)
-    print(f"Saved {len(wallets)} ranked wallets to {output}")
+    full_output, top_output = export_wallets(wallets, output_file)
+    print(f"Saved {len(wallets)} ranked wallets to {full_output}")
+    print(f"Saved top 5 research list to {top_output}")
 
 
 if __name__ == "__main__":
